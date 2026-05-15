@@ -6,10 +6,9 @@ import { isSamePathname } from "../_lib/client-route";
 import { formatMoneyMinor } from "../_lib/den-flow";
 import { useDenFlow } from "../_providers/den-flow-provider";
 
-// For local layout testing (no deploy needed)
-// Enable with: NEXT_PUBLIC_DEN_MOCK_BILLING=1
-const MOCK_BILLING = process.env.NEXT_PUBLIC_DEN_MOCK_BILLING === "1";
-const MOCK_CHECKOUT_URL = (process.env.NEXT_PUBLIC_DEN_MOCK_CHECKOUT_URL ?? "").trim() || null;
+// For local layout testing only (no deploy needed). Enable with NEXT_PUBLIC_DEN_MOCK_BILLING=1.
+const MOCK_BILLING = process.env.NODE_ENV !== "production" && process.env.NEXT_PUBLIC_DEN_MOCK_BILLING === "1";
+const MOCK_CHECKOUT_URL = MOCK_BILLING ? (process.env.NEXT_PUBLIC_DEN_MOCK_CHECKOUT_URL ?? "").trim() || null : null;
 
 function formatSubscriptionStatus(value: string | null | undefined) {
   if (!value) return "Purchase required";
@@ -72,9 +71,9 @@ export function CheckoutScreen({ customerSessionToken }: { customerSessionToken:
     resolveUserLandingRoute,
   } = useDenFlow();
 
-  const mockMode = MOCK_BILLING && process.env.NODE_ENV !== "production";
+  const mockMode = MOCK_BILLING;
 
-  const billingSummary = MOCK_BILLING
+  const billingSummary = mockMode
     ? {
         featureGateEnabled: true,
         hasActivePlan: false,
@@ -199,8 +198,8 @@ export function CheckoutScreen({ customerSessionToken }: { customerSessionToken:
   }
 
   const billingPrice = billingSummary?.price ?? null;
-  const showLoading = resuming || (billingBusy && !billingSummary && !MOCK_BILLING);
-  const checkoutHref = effectiveCheckoutUrl ?? MOCK_CHECKOUT_URL ?? null;
+  const showLoading = resuming || (billingBusy && !billingSummary && !mockMode);
+  const checkoutHref = effectiveCheckoutUrl ?? (mockMode ? MOCK_CHECKOUT_URL : null) ?? null;
   const planAmountLabel =
     billingPrice && billingPrice.amount !== null
       ? `${formatMoneyMinor(billingPrice.amount, billingPrice.currency)}/${billingPrice.recurringInterval}`

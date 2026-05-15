@@ -22,7 +22,6 @@ import { DashboardPageTemplate } from "../../_components/ui/dashboard-page-templ
 import { DenButton } from "../../_components/ui/button";
 import { OrgLimitDialog } from "../../_components/org-limit-dialog";
 import {
-  OPENWORK_APP_CONNECT_BASE_URL,
   buildOpenworkAppConnectUrl,
   buildOpenworkDeepLink,
   getErrorMessage,
@@ -314,6 +313,7 @@ export function BackgroundAgentsScreen() {
     clearOrgLimitError,
     renameWorker,
     renameBusyWorkerId,
+    runtimeConfig,
   } = useDenFlow();
   const feedbackHref = buildDenFeedbackUrl({
     pathname: getBackgroundAgentsRoute(orgSlug),
@@ -358,7 +358,7 @@ export function BackgroundAgentsScreen() {
         ownerToken: tokens.ownerToken,
         clientToken: tokens.clientToken,
         openworkAppConnectUrl: buildOpenworkAppConnectUrl(
-          OPENWORK_APP_CONNECT_BASE_URL,
+          runtimeConfig.openworkAppConnectUrl,
           tokens.openworkUrl,
           tokens.clientToken,
           workerId,
