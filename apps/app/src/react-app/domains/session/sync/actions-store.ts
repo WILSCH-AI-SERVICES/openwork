@@ -61,6 +61,42 @@ const fileToDataUrl = (file: File) =>
     reader.readAsDataURL(file);
   });
 
+// Wilsch patch (#1834): private-use-area sentinel that prefixes path-injection text
+// parts so the spa-attach-as-path-render-filter.patch can hide them from Susan's
+// user-message bubble while the agent still reads them. PUA codepoint U+E000 is
+// guaranteed unassigned by Unicode → zero collision risk with legitimate user text.
+// Must remain identical to the SENTINEL_PREFIX in spa-attach-as-path-render-filter.patch
+// (apps/app/src/react-app/domains/session/surface/message-list.tsx).
+const SENTINEL_PREFIX = "";
+
+// Wilsch patch (#1673): non-image attachments (xlsx/csv/etc.) bypass base64 multimodal
+// bundling — POST to FastMCP /upload, then emit a TEXT part announcing the
+// orchestrator-readable path. Anthropic's document.source.base64 only accepts
+// application/pdf, so xlsx as base64 fails the validator. opencode prompt_async
+// also silently drops file parts whose `url` is `file://...` (only data: URIs are
+// accepted) — so we encode the path in a text part the agent reads naturally and
+// passes to tools like excel_analysis(file_path="..."). Images keep fileToDataUrl.
+const uploadAttachmentToFastMCP = async (file: File): Promise<string> => {
+  const token = (typeof window !== "undefined"
+    ? window.localStorage.getItem("openwork.server.token")
+    : null) ?? "";
+  const formData = new FormData();
+  formData.append("file", file, file.name);
+  const response = await fetch("/upload", {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
+  });
+  if (!response.ok) {
+    throw new Error(`Upload failed (${response.status}): ${response.statusText}`);
+  }
+  const json = (await response.json()) as { path?: string };
+  if (!json.path) {
+    throw new Error("Upload response missing path");
+  }
+  return json.path;
+};
+
 export function createSessionActionsStore(options: {
   client: () => Client | null;
   baseUrl: () => string;
@@ -146,12 +182,31 @@ export function createSessionActionsStore(options: {
 
   type PartInput = TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput;
 
-  const attachmentToFilePart = async (attachment: ComposerAttachment): Promise<FilePartInput> => ({
-    type: "file",
-    url: await fileToDataUrl(attachment.file),
-    filename: attachment.name,
-    mime: attachment.mimeType,
-  });
+  const attachmentToFilePart = async (attachment: ComposerAttachment): Promise<PartInput> => {
+    if (attachment.kind === "image") {
+      return {
+        type: "file",
+        url: await fileToDataUrl(attachment.file),
+        filename: attachment.name,
+        mime: attachment.mimeType,
+      };
+    }
+    const path = await uploadAttachmentToFastMCP(attachment.file);
+    // Wilsch patch (#1834): prefix with SENTINEL_PREFIX so the render-filter
+    // patch hides this text from Susan's bubble. This path is the actions-store
+    // emission site (non-user-send code paths); session-route.tsx mirrors the
+    // sentinel + adds a file-chip part for the user-send path.
+    return {
+      type: "text",
+      text:
+        SENTINEL_PREFIX +
+        `[Attached file: ${attachment.name}] ` +
+        `Available at orchestrator-readable path \`${path}\` ` +
+        `(MIME: ${attachment.mimeType}). ` +
+        `Pass this path to tools that accept absolute file paths ` +
+        `(e.g., excel_analysis(file_path="${path}")).`,
+    } as TextPartInput;
+  };
 
   const buildPromptParts = async (draft: ComposerDraft): Promise<PartInput[]> => {
     const parts: PartInput[] = [];
