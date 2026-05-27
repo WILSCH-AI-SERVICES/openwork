@@ -16,6 +16,14 @@ import {
   type ReactComposerNotice as ReactComposerNoticeData,
 } from "./notice";
 
+// Wilsch (#1848): client-handoff surface — clientMode boolean fork per L2 v2.5.
+// Build-time env var: VITE_OPENWORK_CLIENT_MODE=true hides admin affordances
+// (tool menu, model picker) so Susan sees only the chat-input task surface.
+// VITE_OPENWORK_CLIENT_MODE=false (or unset) leaves admin chrome intact for
+// the implementer's dev workflow. Upstream-PR-able as `embeddableMode` /
+// `clientMode` per the design doc.
+const clientMode = import.meta.env.VITE_OPENWORK_CLIENT_MODE === "true";
+
 type MentionItem = {
   id: string;
   kind: "agent" | "file";
@@ -1155,21 +1163,23 @@ export function ReactSessionComposer(props: ComposerProps) {
                   <Paperclip size={16} />
                 </button>
                 <div ref={toolMenuRef} className="relative">
-                  <button
-                    type="button"
-                    className={`inline-flex h-9 max-h-9 w-9 items-center justify-center rounded-md transition-colors ${toolMenuOpen ? "bg-gray-3 text-gray-12" : "text-gray-10 hover:bg-gray-3"}`}
-                    onClick={() => {
-                      setMentionOpen(false);
-                      setMentionItems([]);
-                      setSlashOpen(false);
-                      setToolMenuOpen((value) => !value);
-                    }}
-                    aria-expanded={toolMenuOpen}
-                    aria-haspopup="dialog"
-                    title={t("composer.tools_label")}
-                  >
-                    <Plug size={16} />
-                  </button>
+                  {!clientMode && (
+                    <button
+                      type="button"
+                      className={`inline-flex h-9 max-h-9 w-9 items-center justify-center rounded-md transition-colors ${toolMenuOpen ? "bg-gray-3 text-gray-12" : "text-gray-10 hover:bg-gray-3"}`}
+                      onClick={() => {
+                        setMentionOpen(false);
+                        setMentionItems([]);
+                        setSlashOpen(false);
+                        setToolMenuOpen((value) => !value);
+                      }}
+                      aria-expanded={toolMenuOpen}
+                      aria-haspopup="dialog"
+                      title={t("composer.tools_label")}
+                    >
+                      <Plug size={16} />
+                    </button>
+                  )}
                   {toolMenuOpen ? (
                     <div className="absolute bottom-full left-0 z-40 mb-3 w-[min(calc(100vw-2.5rem),34rem)] overflow-hidden rounded-[22px] border border-dls-border bg-dls-surface shadow-[var(--dls-shell-shadow)]">
                       <div className="grid grid-cols-[152px_minmax(0,1fr)] sm:grid-cols-[176px_minmax(0,1fr)]">
@@ -1463,14 +1473,16 @@ export function ReactSessionComposer(props: ComposerProps) {
             </div>
             */}
 
-            <ModelSelect
-              open={props.modelPickerOpen}
-              value={props.selectedModel}
-              onOpenChange={props.onModelPickerOpenChange}
-              onChange={props.onModelChange}
-              disabled={props.busy}
-            />
-            {props.modelUnavailable ? (
+            {!clientMode && (
+              <ModelSelect
+                open={props.modelPickerOpen}
+                value={props.selectedModel}
+                onOpenChange={props.onModelPickerOpenChange}
+                onChange={props.onModelChange}
+                disabled={props.busy}
+              />
+            )}
+            {!clientMode && props.modelUnavailable ? (
               <span className="text-xs font-medium text-red-10">Model no longer available</span>
             ) : null}
 

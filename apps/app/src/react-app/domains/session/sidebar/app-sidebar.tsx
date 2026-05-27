@@ -31,6 +31,11 @@ import {
 } from "../../../../app/utils";
 import { t } from "../../../../i18n";
 
+// Wilsch (#1848): client-handoff surface — clientMode boolean fork per L2 v2.5.
+// VITE_OPENWORK_CLIENT_MODE=true hides workspace picker, "+ Add workspace",
+// WorkspaceHeader, ActionsMenu, and collapse toggle — single-workspace client deploy.
+const clientMode = import.meta.env.VITE_OPENWORK_CLIENT_MODE === "true";
+
 import {
   Sidebar,
   SidebarFooter,
@@ -519,16 +524,18 @@ export function AppSidebar(props: AppSidebarProps) {
           </m.div>
         </LazyMotion>
 
-        <SidebarFooter>
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton onClick={props.onOpenCreateWorkspace}>
-                <Plus className="size-4" />
-                {t("workspace_list.add_workspace")}
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarFooter>
+        {!clientMode && (
+          <SidebarFooter>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton onClick={props.onOpenCreateWorkspace}>
+                  <Plus className="size-4" />
+                  {t("workspace_list.add_workspace")}
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarFooter>
+        )}
         <SidebarRail
           aria-label={props.onStartResize ? t("session.resize_workspace_column") : undefined}
           title={props.onStartResize ? t("session.resize_workspace_column") : undefined}
@@ -726,23 +733,31 @@ function WorkspaceSidebarGroup({
         <SidebarMenu>
           <Collapsible
             render={<SidebarMenuItem />}
-            open={isExpanded}
-            onOpenChange={() => ctx.toggleWorkspaceExpanded(workspace.id)}
+            open={clientMode ? true : isExpanded}
+            onOpenChange={clientMode ? undefined : () => ctx.toggleWorkspaceExpanded(workspace.id)}
             className="group/collapsible"
           >
-            <div className="group/workspace-header relative">
-              <WorkspaceHeader
-                workspace={workspace}
-                statusLabel={statusLabel}
-                isError={group.status === "error"}
-                isLoading={group.status === "loading" || isConnecting}
-                onTitlePointerDown={onWorkspaceTitlePointerDown}
-              />
-              <div data-workspace-actions className="group/workspace-actions absolute right-9 top-1/2 flex -translate-y-1/2 items-center gap-1">
+            <div className={cn("group/workspace-header relative", clientMode && "h-8")}>
+              {!clientMode && (
+                <WorkspaceHeader
+                  workspace={workspace}
+                  statusLabel={statusLabel}
+                  isError={group.status === "error"}
+                  isLoading={group.status === "loading" || isConnecting}
+                  onTitlePointerDown={onWorkspaceTitlePointerDown}
+                />
+              )}
+              <div data-workspace-actions className={cn(
+                "group/workspace-actions absolute top-1/2 flex -translate-y-1/2 items-center gap-1",
+                clientMode ? "right-2" : "right-9",
+              )}>
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="size-6 text-muted-foreground opacity-0 group-hover/workspace-header:opacity-100 group-focus-within/workspace-actions:opacity-100"
+                  className={cn(
+                    "size-6 text-muted-foreground",
+                    !clientMode && "opacity-0 group-hover/workspace-header:opacity-100 group-focus-within/workspace-actions:opacity-100",
+                  )}
                   onClick={(e) => {
                     e.stopPropagation();
                     ctx.onCreateTaskInWorkspace(workspace.id);
@@ -752,26 +767,30 @@ function WorkspaceSidebarGroup({
                 >
                   <Plus className="size-4" />
                 </Button>
-                <WorkspaceActionsMenu
-                  workspace={workspace}
-                  isConnectionActionBusy={isConnectionActionBusy}
-                  canRecover={canRecover}
-                  className="size-6 text-muted-foreground opacity-0 group-hover/workspace-header:opacity-100 group-focus-within/workspace-actions:opacity-100 data-popup-open:opacity-100"
-                />
+                {!clientMode && (
+                  <WorkspaceActionsMenu
+                    workspace={workspace}
+                    isConnectionActionBusy={isConnectionActionBusy}
+                    canRecover={canRecover}
+                    className="size-6 text-muted-foreground opacity-0 group-hover/workspace-header:opacity-100 group-focus-within/workspace-actions:opacity-100 data-popup-open:opacity-100"
+                  />
+                )}
               </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="absolute right-2 top-1/2 size-6 -translate-y-1/2 text-muted-foreground flex items-center justify-center group/expand-collapse-button"
-                aria-label={isExpanded ? t("sidebar.collapse") : t("sidebar.expand")}
-                aria-expanded={isExpanded}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  ctx.toggleWorkspaceExpanded(workspace.id);
-                }}
-              >
-                <ChevronRight className={cn("size-4 transition-transform duration-200 text-muted-foreground group-hover/expand-collapse-button:text-foreground", isExpanded && "rotate-90")} />
-              </Button>
+              {!clientMode && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-2 top-1/2 size-6 -translate-y-1/2 text-muted-foreground flex items-center justify-center group/expand-collapse-button"
+                  aria-label={isExpanded ? t("sidebar.collapse") : t("sidebar.expand")}
+                  aria-expanded={isExpanded}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    ctx.toggleWorkspaceExpanded(workspace.id);
+                  }}
+                >
+                  <ChevronRight className={cn("size-4 transition-transform duration-200 text-muted-foreground group-hover/expand-collapse-button:text-foreground", isExpanded && "rotate-90")} />
+                </Button>
+              )}
             </div>
 
             <CollapsibleContent className="pt-px">

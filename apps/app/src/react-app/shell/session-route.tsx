@@ -151,6 +151,11 @@ import {
   useProviderListQuery,
 } from "../domains/connections/provider-list-query";
 
+// Wilsch (#1848): client-handoff surface — clientMode boolean fork per L2 v2.5.
+// VITE_OPENWORK_CLIENT_MODE=true gates session-action callbacks + statusBar
+// settings button to undefined/false (hides admin chrome from Susan).
+const clientMode = import.meta.env.VITE_OPENWORK_CLIENT_MODE === "true";
+
 type RouteWorkspace = OpenworkWorkspaceInfo & {
   displayNameResolved: string;
 };
@@ -2868,13 +2873,13 @@ export function SessionRoute() {
         onReorderWorkspaces: handleReorderWorkspaces,
       }}
       surface={surfaceProps}
-      history={{
-        canUndo: false,
-        canRedo: false,
-        busyAction: null,
-        onUndo: () => {},
-        onRedo: () => {},
-      }}
+      // Wilsch (#1848): client-handoff surface — config-only locks per L2 v2.5
+      // §Client-Handoff Surface "config-only free wins" layer. These props are
+      // unconditional (not clientMode-gated) because the ARCHIBUS engagement
+      // workspace permanently doesn't expose Revert/Redo, session rename/delete,
+      // or Settings ⚙️ — these are workspace-level decisions, independent of
+      // the clientMode fork.
+      history={null}
       todos={todos}
       sessionLoadingById={(sessionId) => effectiveLoading && Boolean(sessionId && sessionId === selectedSessionId)}
       shareWorkspaceModal={
@@ -2915,34 +2920,57 @@ export function SessionRoute() {
       questionReplyBusy={questionReplyBusy}
       respondQuestion={respondQuestion}
       safeStringify={safeStringify}
+      // Wilsch (#1848): client-handoff surface — drop session-action callbacks
+      // under clientMode so SessionPage's showSessionActions auto-computes false
+      // (hides "..." rename/delete menu on session items). Admin mode retains
+      // upstream's full callback implementations.
       onRenameSession={
-        opencodeClient
-          ? async (sessionId, nextTitle) => {
-              const trimmed = nextTitle.trim();
-              if (!trimmed) return;
-              await opencodeClient.session.update({
-                sessionID: sessionId,
-                title: trimmed,
-                directory: selectedWorkspaceRoot || undefined,
-              });
-              await refreshRouteState();
-            }
-          : undefined
+        clientMode
+          ? undefined
+          : opencodeClient
+              ? async (sessionId, nextTitle) => {
+                  const trimmed = nextTitle.trim();
+                  if (!trimmed) return;
+                  await opencodeClient.session.update({
+                    sessionID: sessionId,
+                    title: trimmed,
+                    directory: selectedWorkspaceRoot || undefined,
+                  });
+                  await refreshRouteState();
+                }
+              : undefined
       }
       onDeleteSession={
-        client && selectedWorkspaceId
-          ? async (sessionId) => {
-              const endpoint = endpointForWorkspace(selectedWorkspace);
-              if (!endpoint) return;
-              await endpoint.client.deleteSession(endpoint.workspaceId, sessionId);
-              if (selectedSessionId === sessionId) {
-                navigateToWorkspaceSession(selectedWorkspaceId);
-              }
-              await refreshRouteState();
-            }
-          : undefined
+        clientMode
+          ? undefined
+          : client && selectedWorkspaceId
+              ? async (sessionId) => {
+                  const endpoint = endpointForWorkspace(selectedWorkspace);
+                  if (!endpoint) return;
+                  await endpoint.client.deleteSession(endpoint.workspaceId, sessionId);
+                  if (selectedSessionId === sessionId) {
+                    navigateToWorkspaceSession(selectedWorkspaceId);
+                  }
+                  await refreshRouteState();
+                }
+              : undefined
       }
-      statusBar={{ loading: showPreparingStatus }}
+      // Wilsch (#1848): pin showSettingsButton=false under clientMode (Settings
+      // ⚙️ hidden); admin mode keeps upstream's simple loading status.
+      statusBar={
+        clientMode
+          ? (showPreparingStatus
+              ? {
+                  statusLabel: "Preparing workspace",
+                  statusDetail: t("session.loading_detail"),
+                  statusDotClass: "bg-amber-9",
+                  statusPingClass: "bg-amber-9/35 animate-ping",
+                  statusPulse: true,
+                  showSettingsButton: false,
+                }
+              : { showSettingsButton: false })
+          : { loading: showPreparingStatus }
+      }
       notFoundMessage={routeNotFoundMessage}
       onAccessibleTargetsChange={setPaletteAccessibleTargets}
     />

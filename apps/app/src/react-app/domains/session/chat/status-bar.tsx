@@ -44,6 +44,11 @@ function StatusDot({ variant }: StatusDotProps) {
   );
 }
 
+// Wilsch (#1848): client-handoff surface — clientMode boolean fork per L2 v2.5.
+// VITE_OPENWORK_CLIENT_MODE=true hides Docs + Feedback chrome from Susan.
+// Composes with upstream's shellConfig runtime gating (`!clientMode && shellConfig.X`).
+const clientMode = import.meta.env.VITE_OPENWORK_CLIENT_MODE === "true";
+
 type StatusIndicatorProps = {
   clientConnected: boolean;
   openworkServerStatus: OpenworkServerStatus;
@@ -220,7 +225,7 @@ export function StatusBar(props: StatusBarProps) {
               <TooltipContent>{t("den.signin_title")}</TooltipContent>
             </Tooltip>
           ) : null}
-          {shellConfig.docsButton ? (
+          {!clientMode && shellConfig.docsButton ? (
             <Button
               ref={docsButtonRef}
               className="text-muted-foreground gap-2"
@@ -234,7 +239,7 @@ export function StatusBar(props: StatusBarProps) {
               <span>{t("status.docs")}</span>
             </Button>
           ) : null}
-          {shellConfig.feedbackButton ? (
+          {!clientMode && shellConfig.feedbackButton ? (
             <Button
               ref={feedbackButtonRef}
               className="text-muted-foreground gap-2"
