@@ -185,6 +185,9 @@ type SessionTranscriptProps = {
 const VIRTUALIZATION_THRESHOLD = 20;
 const VIRTUAL_OVERSCAN = 4;
 
+// Wilsch patch (#1834): private-use-area sentinel that prefixes path-injection text parts.
+const SENTINEL_PREFIX = "\uE000";
+
 function clampVirtualEstimate(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, Math.round(value)));
 }
@@ -1157,22 +1160,46 @@ function SessionTranscriptInner(props: SessionTranscriptProps) {
     const blocks: MessageBlockItem[] = [];
 
     transcriptMessages.forEach((message) => {
-      const renderableParts = message.parts.filter((part) => {
+      // Wilsch patch (#1834): synthesis + filter pass for path-injection privacy.
+      const SENTINEL_TEXT_REGEX = /\[Attached file: (.+?)\][\s\S]*?\(MIME: ([^)]+)\)/;
+      const renderableParts = message.parts.flatMap((part) => {
+        if (
+          part.type === "text" &&
+          typeof (part as { text?: string }).text === "string" &&
+          (part as { text: string }).text.startsWith(SENTINEL_PREFIX)
+        ) {
+          const match = (part as { text: string }).text.match(SENTINEL_TEXT_REGEX);
+          if (match) {
+            return [
+              {
+                type: "file" as const,
+                url: `wilsch-chip://${match[1]}`,
+                filename: match[1],
+                mime: match[2],
+              },
+            ];
+          }
+          return [];
+        }
+        if (
+          part.type === "text" &&
+          (part as { text?: string }).text?.startsWith("Called the Read tool")
+        ) {
+          return [];
+        }
         if (part.type === "reasoning") {
-          return showThinking;
+          return showThinking ? [part] : [];
         }
-
         if (part.type === "step-start" || part.type === "step-finish") {
-          return false;
+          return [];
         }
-
-        return (
+        const keep =
           part.type === "text" ||
           part.type === "tool" ||
           part.type === "agent" ||
           part.type === "file" ||
-          props.developerMode
-        );
+          props.developerMode;
+        return keep ? [part] : [];
       });
 
       if (!renderableParts.length) return;
