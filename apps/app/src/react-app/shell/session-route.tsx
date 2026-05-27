@@ -2956,19 +2956,12 @@ export function SessionRoute() {
               : undefined
       }
       // Wilsch (#1848): pin showSettingsButton=false under clientMode (Settings
-      // ⚙️ hidden); admin mode keeps upstream's simple loading status.
+      // ⚙️ hidden); admin mode keeps upstream's simple loading status. v0.13.12
+      // StatusDot component owns the visual state — loading prop alone drives
+      // "Preparing workspace" + amber dot natively.
       statusBar={
         clientMode
-          ? (showPreparingStatus
-              ? {
-                  statusLabel: "Preparing workspace",
-                  statusDetail: t("session.loading_detail"),
-                  statusDotClass: "bg-amber-9",
-                  statusPingClass: "bg-amber-9/35 animate-ping",
-                  statusPulse: true,
-                  showSettingsButton: false,
-                }
-              : { showSettingsButton: false })
+          ? { loading: showPreparingStatus, showSettingsButton: false }
           : { loading: showPreparingStatus }
       }
       notFoundMessage={routeNotFoundMessage}
