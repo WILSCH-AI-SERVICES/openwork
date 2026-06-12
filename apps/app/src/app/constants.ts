@@ -10,8 +10,8 @@ export const LANGUAGE_PREF_KEY = "openwork.language";
 export const HIDE_TITLEBAR_PREF_KEY = "openwork.hideTitlebar";
 
 export const DEFAULT_MODEL: ModelRef = {
-  providerID: "opencode",
-  modelID: "big-pickle",
+  providerID: "openrouter",
+  modelID: "anthropic/claude-sonnet-4.6",
 };
 
 export const SUGGESTED_PLUGINS: SuggestedPlugin[] = [];
