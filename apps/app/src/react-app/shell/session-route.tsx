@@ -406,7 +406,7 @@ const SENTINEL_PREFIX = "";
 // application/pdf, so xlsx as base64 fails the validator. opencode prompt_async
 // also silently drops file parts whose `url` is `file://...` (only data: URIs are
 // accepted) — so we encode the path in a text part the agent reads naturally and
-// passes to tools like excel_analysis(file_path="..."). Images keep fileToDataUrl.
+// then loads it from that path via `uv run --with`. Images keep fileToDataUrl.
 async function uploadAttachmentToFastMCP(file: File): Promise<string> {
   const token = (typeof window !== "undefined"
     ? window.localStorage.getItem("openwork.server.token")
@@ -495,8 +495,7 @@ async function draftToParts(draft: ComposerDraft, workspaceRoot: string) {
           `[Attached file: ${attachment.name}] ` +
           `Available at orchestrator-readable path \`${path}\` ` +
           `(MIME: ${attachment.mimeType}). ` +
-          `Pass this path to tools that accept absolute file paths ` +
-          `(e.g., excel_analysis(file_path="${path}")).`,
+          `Read it from that path with \`uv run\` — compose any reader libraries on the fly via \`uv run --with <pkg>\` (e.g. \`uv run --with openpyxl\`).`,
       });
     }
   }
