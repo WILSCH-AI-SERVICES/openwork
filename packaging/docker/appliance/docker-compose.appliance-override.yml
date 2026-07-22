@@ -1,0 +1,7 @@
+services:
+  orchestrator:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+  web:
+    environment:
+      OPENWORK_PUBLIC_HOST: gx10-017d

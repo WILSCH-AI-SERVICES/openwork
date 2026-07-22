@@ -1,0 +1,171 @@
+# docker-compose.appliance.yml — Bare Block A, the unified appliance (#1033)
+#
+# ONE compose stands BOTH halves of the standing box up as a single appliance on the
+# Wilsch-side sandbox DGX Spark (gx10-017d):
+#   - serving        : on-box vLLM (Qwen3.6-35B-A3B-NVFP4), the proven NVFP4 recipe (AC4)
+#   - orchestrator   : the OpenWork worker-runtime (OpenCode subprocess inside), :8787
+#   - mysql/den/web/worker-proxy : Den's login half, pulled in VANILLA from upstream's
+#     own packaging via `include` below — that file is left byte-for-byte untouched, so
+#     the whole Wilsch delta is only this file + .env (AC3: vanilla, no fork/patch).
+#
+# Design: kab-baustein-a-build-design Part 6 (The Compose) + Part 7 (The Login Path).
+# Bring up (one invocation, AC1):
+#   docker compose -p appliance-1033 -f docker-compose.appliance.yml up -d --wait
+#
+# Decided wires (Part 6): one shared chat engine with Den authenticating in front;
+# the model wire runs DIRECT to local vLLM (OpenWork cloud inference proxy dropped);
+# version-lock holds by construction — every half builds/runs from this one checkout.
+
+include:
+  - docker-compose.den-dev.yml
+
+x-orchestrator-shared: &orchestrator-shared
+  image: node:22-bookworm-slim
+  working_dir: /app
+  volumes:
+    - ../../:/app
+    - pnpm-store:/root/.local/share/pnpm/store
+    - bun-install:/root/.bun
+    - ${OPENWORK_WORKSPACE:-./workspace}:/workspace
+    # Backend model wire (ships with the appliance, no UI): opencode imports this provider
+    # config into every session — local-vLLM, direct, no cloud inference proxy.
+    - ./appliance/opencode-config:/persist/.config/opencode:ro
+
+services:
+  # --- Model serving: the proven NVFP4 recipe, AC4-witnessed 2026-07-21 (see appliance/serving-up.sh) ---
+  serving:
+    image: vllm-node:latest
+    network_mode: host          # vLLM on :8000, reached by the worker via host.docker.internal
+    ipc: host
+    shm_size: "8gb"
+    restart: unless-stopped
+    gpus: all
+    volumes:
+      - ${HF_CACHE:-/home/verdant/.cache/huggingface}:/root/.cache/huggingface
+      - /home/verdant/.cache/vllm:/root/.cache/vllm
+      - /home/verdant/.cache/flashinfer:/root/.cache/flashinfer
+      - /home/verdant/.triton:/root/.triton
+      - /home/verdant/.tilelang:/root/.tilelang
+    environment:
+      HF_HUB_OFFLINE: "1"
+      HF_HOME: /root/.cache/huggingface
+      TORCH_CUDA_ARCH_LIST: "12.1a"
+      FLASHINFER_CUDA_ARCH_LIST: "12.1a"
+      VLLM_MARLIN_USE_ATOMIC_ADD: "1"
+    command: >
+      vllm serve nvidia/Qwen3.6-35B-A3B-NVFP4 --host 0.0.0.0 --port 8000
+      --tensor-parallel-size 1 --trust-remote-code --kv-cache-dtype fp8
+      --attention-backend flashinfer --moe-backend marlin
+      --gpu-memory-utilization 0.6 --max-model-len 32768 --max-num-seqs 4 --max-num-batched-tokens 8192
+      --enable-chunked-prefill --async-scheduling --enable-prefix-caching --load-format fastsafetensors
+      --reasoning-parser qwen3 --tool-call-parser qwen3_xml --enable-auto-tool-choice
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/v1/models || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 72
+      start_period: 300s
+
+  # --- OpenWork worker-runtime: the ONE on-box worker Den points at (Part 7). AC5 wire. ---
+  # Runs apps/orchestrator from the pinned source checkout (vanilla, unpatched → AC3).
+  # OpenCode reads the local-vLLM provider from workspace/.opencode/opencode.json (direct wire).
+  orchestrator:
+    <<: *orchestrator-shared
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        mkdir -p /workspace && touch /workspace/.keep 2>/dev/null || true
+        apt-get update -qq && apt-get install -y -qq --no-install-recommends \
+          curl ca-certificates unzip git >/dev/null 2>&1
+        export BUN_INSTALL="/root/.bun"
+        export PATH="$$BUN_INSTALL/bin:$$PATH"
+        if ! command -v bun >/dev/null 2>&1; then
+          echo "[orchestrator] Installing bun..."
+          curl -fsSL https://bun.sh/install | bash
+        fi
+        corepack enable && corepack prepare pnpm@10.27.0 --activate
+        echo "[orchestrator] Installing dependencies..."
+        pnpm install --no-frozen-lockfile --network-concurrency 1 --child-concurrency 1
+        export OPENWORK_SERVER_BIN="/app/apps/server/src/cli.ts"
+        export OPENCODE_ROUTER_BIN="/app/apps/opencode-router/src/cli.ts"
+        if [ -z "$$OPENWORK_TOKEN" ]; then
+          OPENWORK_TOKEN=$$(cat /proc/sys/kernel/random/uuid); export OPENWORK_TOKEN
+        fi
+        if [ -z "$$OPENWORK_HOST_TOKEN" ]; then
+          OPENWORK_HOST_TOKEN=$$(cat /proc/sys/kernel/random/uuid); export OPENWORK_HOST_TOKEN
+        fi
+        echo "============================================"
+        echo "  OpenWork worker-runtime (appliance)"
+        echo "  Worker:  http://localhost:8787  (Den points here per Part 7)"
+        echo "  Token:   $$OPENWORK_TOKEN"
+        echo "============================================"
+        exec pnpm --filter openwork-orchestrator dev -- start \
+          --workspace /workspace \
+          --remote-access \
+          --openwork-port 8787 \
+          --openwork-token "$$OPENWORK_TOKEN" \
+          --openwork-host-token "$$OPENWORK_HOST_TOKEN" \
+          --openwork-server-bin "$$OPENWORK_SERVER_BIN" \
+          --opencode-router-bin "$$OPENCODE_ROUTER_BIN" \
+          --approval auto \
+          --allow-external \
+          --cors "*"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # so OpenCode reaches vLLM on the host :8000
+    ports:
+      - "${OPENWORK_PORT:-8787}:8787"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8787/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 180s
+    environment:
+      CI: "true"
+      OPENWORK_TOKEN: ${OPENWORK_TOKEN:-}
+      OPENWORK_HOST_TOKEN: ${OPENWORK_HOST_TOKEN:-}
+      OPENWORK_DEV_MODE: ${OPENWORK_DEV_MODE:-1}
+      OPENWORK_SIDECAR_SOURCE: external
+      # Import the mounted opencode provider config into each worker session (the file wire above)
+      OPENWORK_DEV_OPENCODE_IMPORT_CONFIG_DIR: /persist/.config/opencode
+
+  # --- Chat SPA (@openwork/app): the MAIN OpenWork chat UI. Runs on the box; the browser
+  #     opens it at /connect-remote?openworkUrl=..&openworkToken=..&autoConnect=1 → the box worker. ---
+  chat-spa:
+    image: node:22-bookworm-slim
+    working_dir: /app
+    restart: unless-stopped
+    volumes:
+      - ../../:/app
+      - spa-pnpm-store:/root/.local/share/pnpm/store
+      - spa-bun-install:/root/.bun
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        apt-get update -qq && apt-get install -y -qq --no-install-recommends curl ca-certificates unzip git >/dev/null 2>&1
+        export BUN_INSTALL="/root/.bun"; export PATH="$$BUN_INSTALL/bin:$$PATH"
+        command -v bun >/dev/null 2>&1 || curl -fsSL https://bun.sh/install | bash
+        corepack enable && corepack prepare pnpm@10.27.0 --activate
+        pnpm install --no-frozen-lockfile --network-concurrency 1 --child-concurrency 1
+        export VITE_ALLOWED_HOSTS=all HOST=0.0.0.0 PORT=5173
+        exec pnpm --filter @openwork/app exec vite --host 0.0.0.0 --port 5173 --strictPort
+    ports:
+      - "5173:5173"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5173 >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 72
+      start_period: 300s
+
+volumes:
+  spa-pnpm-store:
+    name: openwork-appliance-spa-pnpm-store
+  spa-bun-install:
+    name: openwork-appliance-spa-bun-install
+  pnpm-store:
+    name: openwork-appliance-pnpm-store
+  bun-install:
+    name: openwork-appliance-bun-install
