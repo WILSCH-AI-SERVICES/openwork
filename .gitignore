@@ -55,3 +55,4 @@ vendor/opencode/
 .vercel
 .env*.local
 .claude/*
+packaging/docker/appliance.env
