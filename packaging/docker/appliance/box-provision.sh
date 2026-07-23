@@ -10,6 +10,18 @@ BOX_URL="${BOX_URL:-http://100.85.150.22:8787}"   # reachable from the den conta
 EMAIL="${EMAIL:-demo@wilsch.local}"; PASS="${PASS:-WilschBlockA-2026}"
 J="$(mktemp)"; trap 'rm -f "$J"' EXIT
 
+# Persist a KEY=VALUE into the --env-file so a plain `... up` re-reads it after a restart
+# (durability, #1038): replace an existing line, else append. Portable across macOS/Linux.
+ENV_FILE="appliance.env"
+upsert_env() {
+  local key="$1" val="$2"
+  [ -f "$ENV_FILE" ] || touch "$ENV_FILE"
+  if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
+    grep -v "^${key}=" "$ENV_FILE" > "$ENV_FILE.tmp" && mv "$ENV_FILE.tmp" "$ENV_FILE"
+  fi
+  printf '%s=%s\n' "$key" "$val" >> "$ENV_FILE"
+}
+
 echo "[1/4] admin session ($EMAIL)"
 curl -s --max-time 20 -c "$J" -X POST http://localhost:3005/api/auth/sign-in/email \
   -H "Content-Type: application/json" -H "Origin: http://gx10-017d:3005" \
@@ -32,13 +44,21 @@ HT="$(echo "$RESP" | jq -r '.tokens.host')"
 [ -n "$WID" ] && [ "$WID" != "null" ] || { echo "worker create failed: $RESP"; exit 1; }
 echo "    worker=$WID"
 
-echo "[3/4] launch orchestrator carrying this worker's Den tokens"
-OPENWORK_TOKEN="$CT" OPENWORK_HOST_TOKEN="$HT" $DC up -d --force-recreate orchestrator >/dev/null 2>&1
+echo "[3/4] persist durable wire into appliance.env + (re)launch orchestrator & chat-spa"
+# Durable across a restart (AC3): a later `... up` re-reads these four from --env-file appliance.env,
+# so the Den-minted token authenticates again without re-provisioning — the worker row survives in the
+# den-mysql-data volume. VITE_OPENWORK_URL/TOKEN are what the browser SPA hydrates on boot (AC1/AC2).
+upsert_env OPENWORK_TOKEN "$CT"
+upsert_env OPENWORK_HOST_TOKEN "$HT"
+upsert_env VITE_OPENWORK_URL "$BOX_URL"
+upsert_env VITE_OPENWORK_TOKEN "$CT"
+$DC up -d --force-recreate orchestrator chat-spa >/dev/null 2>&1
 for i in $(seq 1 40); do
   $DC ps --format '{{.Service}}={{.Health}}' 2>/dev/null | grep -q 'orchestrator=healthy' && break
   sleep 5
 done
 echo "    orchestrator: $($DC ps --format '{{.Service}}={{.Health}}' 2>/dev/null | grep orchestrator)"
+echo "    chat-spa:     $($DC ps --format '{{.Service}}={{.Health}}' 2>/dev/null | grep chat-spa) — SPA hydrates VITE_OPENWORK_URL=$BOX_URL on boot"
 
 echo "[4/4] link to Den (worker_instance row)"
 # Reuse the worker's own typeid suffix (a valid 26-char crockford id) — pipefail-safe.
