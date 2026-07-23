@@ -130,8 +130,11 @@ services:
       # Import the mounted opencode provider config into each worker session (the file wire above)
       OPENWORK_DEV_OPENCODE_IMPORT_CONFIG_DIR: /persist/.config/opencode
 
-  # --- Chat SPA (@openwork/app): the MAIN OpenWork chat UI. Runs on the box; the browser
-  #     opens it at /connect-remote?openworkUrl=..&openworkToken=..&autoConnect=1 → the box worker. ---
+  # --- Chat SPA (@openwork/app): the MAIN OpenWork chat UI. Runs on the box; on boot the SPA's
+  #     hydrateOpenworkServerSettingsFromEnv() reads VITE_OPENWORK_URL + VITE_OPENWORK_TOKEN from
+  #     this container's env and connects the box worker directly — a pure browser, no connect-remote
+  #     page and no clientMode fork (#1038). box-provision.sh writes those vars into appliance.env at
+  #     provision time (the token is Den-minted, durable across restart via the den-mysql-data volume). ---
   chat-spa:
     image: node:22-bookworm-slim
     working_dir: /app
@@ -151,6 +154,13 @@ services:
         pnpm install --no-frozen-lockfile --network-concurrency 1 --child-concurrency 1
         export VITE_ALLOWED_HOSTS=all HOST=0.0.0.0 PORT=5173
         exec pnpm --filter @openwork/app exec vite --host 0.0.0.0 --port 5173 --strictPort
+    environment:
+      # Read by the SPA on boot via import.meta.env.VITE_* (openwork-server.ts hydrate). Vite gives
+      # already-set process-env the highest priority, so these reach the client bundle when present
+      # before `exec vite` above — no in-SPA .env file, no source fork (AC1/AC2, config-only). Empty
+      # until box-provision.sh writes the Den-minted client token + Tailscale worker URL to appliance.env.
+      VITE_OPENWORK_URL: ${VITE_OPENWORK_URL:-}
+      VITE_OPENWORK_TOKEN: ${VITE_OPENWORK_TOKEN:-}
     ports:
       - "5173:5173"
     healthcheck:
