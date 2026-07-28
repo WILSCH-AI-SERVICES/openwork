@@ -113,6 +113,10 @@ services:
           --cors "*"
     extra_hosts:
       - "host.docker.internal:host-gateway"   # so OpenCode reaches vLLM on the host :8000
+      # Egress seal (Refs #1043): blackhole the hosted inference domain so no session —
+      # even a hand-selected cloud model — can leave the box. The on-box wire above and
+      # dep-install (bun.sh, npm registry, apt) stay reachable; only opencode.ai is dead.
+      - "opencode.ai:0.0.0.0"
     ports:
       - "${OPENWORK_PORT:-8787}:8787"
     healthcheck:
