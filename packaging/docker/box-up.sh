@@ -45,7 +45,8 @@ for i in $(seq 1 120); do
 done
 
 echo "[box-up] 2/3 — appliance stack via compose (Den + orchestrator + chat SPA)"
-docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" up -d --wait
+ENV_ARGS=""; [ -f appliance.env ] && ENV_ARGS="--env-file appliance.env"
+  docker compose -p "$COMPOSE_PROJECT" $ENV_ARGS -f "$COMPOSE_FILE" up -d --wait
 
 echo "[box-up] 3/3 — appliance up. serve=$SERVE_NAME (host :$SERVE_PORT) · worker :8787 · chat :5173"
-docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" ps
+docker compose -p "$COMPOSE_PROJECT" ${ENV_ARGS:-} -f "$COMPOSE_FILE" ps
