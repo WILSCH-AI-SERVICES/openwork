@@ -3,15 +3,16 @@
 # Stands the single on-box worker into Den: create a destination:"local" worker, launch the
 # orchestrator carrying that worker's Den tokens, and link it via a worker_instance row.
 # Run from packaging/docker/ after the appliance is up and den is healthy.
+#
+# Auth (fixed #1048): Den's better-auth trusts localhost origins only, so sign-in sends
+# Origin: http://localhost:3005; the Den API on :8788 authenticates by Bearer token (the
+# sign-in body's .token), NOT the session cookie — every :8788 call carries Authorization: Bearer.
 set -euo pipefail
 
 DC="docker compose -p appliance-1033 --env-file appliance.env -f docker-compose.appliance.yml"
-BOX_URL="${BOX_URL:-http://100.85.150.22:8787}"   # reachable from the den container AND an operator browser (tailscale)
+BOX_URL="${BOX_URL:-http://100.85.150.22:8787}"
 EMAIL="${EMAIL:-demo@wilsch.local}"; PASS="${PASS:-WilschBlockA-2026}"
-J="$(mktemp)"; trap 'rm -f "$J"' EXIT
 
-# Persist a KEY=VALUE into the --env-file so a plain `... up` re-reads it after a restart
-# (durability, #1038): replace an existing line, else append. Portable across macOS/Linux.
 ENV_FILE="appliance.env"
 upsert_env() {
   local key="$1" val="$2"
@@ -23,19 +24,21 @@ upsert_env() {
 }
 
 echo "[1/4] admin session ($EMAIL)"
-curl -s --max-time 20 -c "$J" -X POST http://localhost:3005/api/auth/sign-in/email \
-  -H "Content-Type: application/json" -H "Origin: http://gx10-017d:3005" \
-  -d "{\"email\":\"$EMAIL\",\"password\":\"$PASS\"}" >/dev/null
+TOKEN="$(curl -s --max-time 20 -X POST http://localhost:3005/api/auth/sign-in/email \
+  -H "Content-Type: application/json" -H "Origin: http://localhost:3005" \
+  -d "{\"email\":\"$EMAIL\",\"password\":\"$PASS\"}" | jq -r '.token')"
+[ -n "$TOKEN" ] && [ "$TOKEN" != "null" ] || { echo "sign-in failed (no token)"; exit 1; }
+AUTH="Authorization: Bearer $TOKEN"
 
 echo "[1b] retire any existing workers (single-worker box)"
-for w in $(curl -s -b "$J" http://localhost:8788/v1/workers 2>/dev/null | jq -r '.workers[].id' 2>/dev/null); do
-  curl -s -b "$J" -X DELETE "http://localhost:8788/v1/workers/$w" >/dev/null 2>&1 || true
+for w in $(curl -s -H "$AUTH" http://localhost:8788/v1/workers 2>/dev/null | jq -r '.workers[].id' 2>/dev/null); do
+  curl -s -H "$AUTH" -X DELETE "http://localhost:8788/v1/workers/$w" >/dev/null 2>&1 || true
 done
 docker exec appliance-1033-mysql-1 mysql -uroot -ppassword openwork_den \
   -e "DELETE FROM worker_instance;" 2>/dev/null || true
 
 echo "[2/4] create destination:local worker"
-RESP="$(curl -s --max-time 25 -b "$J" -X POST http://localhost:8788/v1/workers \
+RESP="$(curl -s --max-time 25 -H "$AUTH" -X POST http://localhost:8788/v1/workers \
   -H "Content-Type: application/json" \
   -d '{"name":"Block A Box","destination":"local","workspacePath":"/workspace"}')"
 WID="$(echo "$RESP" | jq -r '.worker.id')"
@@ -45,9 +48,6 @@ HT="$(echo "$RESP" | jq -r '.tokens.host')"
 echo "    worker=$WID"
 
 echo "[3/4] persist durable wire into appliance.env + (re)launch orchestrator & chat-spa"
-# Durable across a restart (AC3): a later `... up` re-reads these four from --env-file appliance.env,
-# so the Den-minted token authenticates again without re-provisioning — the worker row survives in the
-# den-mysql-data volume. VITE_OPENWORK_URL/TOKEN are what the browser SPA hydrates on boot (AC1/AC2).
 upsert_env OPENWORK_TOKEN "$CT"
 upsert_env OPENWORK_HOST_TOKEN "$HT"
 upsert_env VITE_OPENWORK_URL "$BOX_URL"
@@ -61,7 +61,6 @@ echo "    orchestrator: $($DC ps --format '{{.Service}}={{.Health}}' 2>/dev/null
 echo "    chat-spa:     $($DC ps --format '{{.Service}}={{.Health}}' 2>/dev/null | grep chat-spa) — SPA hydrates VITE_OPENWORK_URL=$BOX_URL on boot"
 
 echo "[4/4] link to Den (worker_instance row)"
-# Reuse the worker's own typeid suffix (a valid 26-char crockford id) — pipefail-safe.
 WKI="wki_${WID#wrk_}"
 docker exec appliance-1033-mysql-1 mysql -uroot -ppassword openwork_den -e \
   "INSERT INTO worker_instance (id,worker_id,provider,url,status) VALUES ('$WKI','$WID','local','$BOX_URL','healthy');" 2>/dev/null
@@ -69,7 +68,7 @@ docker exec appliance-1033-mysql-1 mysql -uroot -ppassword openwork_den -e \
 echo "provisioned: worker=$WID instance=$WKI url=$BOX_URL"
 
 echo "=== VERIFY: Den resolves + /opencode answers (David's chain) ==="
-TR="$(curl -s --max-time 25 -b "$J" -X POST "http://localhost:8788/v1/workers/$WID/tokens" -H "Content-Type: application/json" -d '{}')"
+TR="$(curl -s --max-time 25 -H "$AUTH" -X POST "http://localhost:8788/v1/workers/$WID/tokens" -H "Content-Type: application/json" -d '{}')"
 URL="$(echo "$TR" | jq -r '.connect.openworkUrl')"
 VCT="$(echo "$TR" | jq -r '.tokens.client')"
 echo "openworkUrl=$URL"
