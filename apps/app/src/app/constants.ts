@@ -16,9 +16,12 @@ export const VARIANT_PREF_KEY = "openwork.modelVariant";
 export const LANGUAGE_PREF_KEY = "openwork.language";
 export const HIDE_TITLEBAR_PREF_KEY = "openwork.hideTitlebar";
 
+// On-box appliance default: a cleared-storage session must answer from the local
+// vLLM serve, not a hosted provider. Matches the box's opencode.json provider
+// (packaging/docker/appliance/opencode-config/opencode.json). Refs #1043.
 export const DEFAULT_MODEL: ModelRef = {
-  providerID: "opencode",
-  modelID: "big-pickle",
+  providerID: "local-vllm",
+  modelID: "nvidia/Qwen3.6-35B-A3B-NVFP4",
 };
 
 export const SUGGESTED_PLUGINS: SuggestedPlugin[] = [];

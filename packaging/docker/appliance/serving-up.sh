@@ -17,6 +17,6 @@ docker run -d --name serving --gpus all --network host --ipc host --shm-size 8g 
   vllm serve nvidia/Qwen3.6-35B-A3B-NVFP4 --host 0.0.0.0 --port 8000 \
     --tensor-parallel-size 1 --trust-remote-code --kv-cache-dtype fp8 \
     --attention-backend flashinfer --moe-backend marlin \
-    --gpu-memory-utilization 0.6 --max-model-len 32768 --max-num-seqs 4 --max-num-batched-tokens 8192 \
+    --gpu-memory-utilization 0.6 --max-model-len 262144 --max-num-seqs 4 --max-num-batched-tokens 8192 \
     --enable-chunked-prefill --async-scheduling --enable-prefix-caching --load-format fastsafetensors \
     --reasoning-parser qwen3 --tool-call-parser qwen3_xml --enable-auto-tool-choice
