@@ -13,18 +13,32 @@
 # Fallback: if the recipe cannot drive the solo / host-network / offline serve, bring the
 # serve up with appliance/serving-up.sh (the retained hand-copied argv) and then run the
 # compose step below.
+#
+# Paths are per-deployment, not per-author: SPARK_VLLM_DIR (the spark-vllm-docker checkout)
+# and HF_HOME (the weight cache) default under the invoking operator's $HOME and are each
+# overridable, so the box comes up for whoever runs it (#1071). On a shared box where the
+# weights live in another account's cache, point HF_HOME at that cache explicitly.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$HERE"
 
-SPARK_VLLM_DIR="${SPARK_VLLM_DIR:-/home/verdant/spark-vllm-docker}"
+SPARK_VLLM_DIR="${SPARK_VLLM_DIR:-$HOME/spark-vllm-docker}"
 RECIPE="${RECIPE:-qwen3.6-35b-a3b-nvfp4-no-mtp}"
-export HF_HOME="${HF_HOME:-/home/verdant/.cache/huggingface}"
+export HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"
 SERVE_NAME="${SERVE_NAME:-appliance-serving}"
 COMPOSE_PROJECT="${COMPOSE_PROJECT:-appliance-1033}"
 COMPOSE_FILE="docker-compose.appliance.yml"
 SERVE_PORT="${SERVE_PORT:-8000}"
+
+# Preflight: an unreadable checkout used to surface as a bare exit 126 from line 34, with
+# nothing naming the cause. Fail here instead, pointing at the override that fixes it.
+if [ ! -x "$SPARK_VLLM_DIR/run-recipe.sh" ]; then
+  echo "[box-up]   ERROR: no executable run-recipe.sh at $SPARK_VLLM_DIR" >&2
+  echo "[box-up]          set SPARK_VLLM_DIR to your spark-vllm-docker checkout, e.g." >&2
+  echo "[box-up]          SPARK_VLLM_DIR=\$HOME/spark-vllm-docker ./box-up.sh" >&2
+  exit 1
+fi
 
 echo "[box-up] 1/3 — model serve via run-recipe.sh ($RECIPE, host :$SERVE_PORT)"
 if docker ps --format '{{.Names}}' | grep -q "^${SERVE_NAME}$"; then
